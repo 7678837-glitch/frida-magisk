@@ -153,16 +153,8 @@ jobs:
             gh release download "$asset_release_tag" \
               --pattern "$archive_name" \
               --dir "$PWD/build/antidetect-assets"
-            # The checksum file is mandatory unless allow_unverified was explicitly requested.
-            if ! gh release download "$asset_release_tag" \
-              --pattern "$archive_name.sha256" \
-              --dir "$PWD/build/antidetect-assets"; then
-              if [[ "${ANTIDETECT_ALLOW_UNVERIFIED:-}" != "1" ]]; then
-                echo "Missing $archive_name.sha256 in release $asset_release_tag." >&2
-                exit 1
-              fi
-              echo "::warning::$archive_name.sha256 not found; continuing because allow_unverified=true."
-            fi
+            # Expected archive hash comes from antidetect/hashes.sha256 committed in this repo
+            # (fail-closed in prepare-antidetect-assets.sh), not from the asset release.
             export ANTIDETECT_ASSET_ARCHIVE="$PWD/build/antidetect-assets/$archive_name"
             bash scripts/prepare-antidetect-assets.sh
           else
