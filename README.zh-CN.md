@@ -111,6 +111,15 @@ Release 规则：
 - tag 构建发布推送的 tag。
 - 手动构建只有在 `publish_release=true` 时发布。
 
+
+### 模块更新（updateJson）
+
+- 官方模块的 `module.prop` 把 `updateJson` 指向 `main` 上的 `update/official.json`，Magisk / KernelSU 可以在应用内提示更新。下载的是 `universal` ZIP。
+- 发布成功后，publish job 会更新 `update/official.json` 和 `update/official-changelog.md`，并推送到默认分支。这一步只在 `xjoker/frida-magisk` 上运行，PR、fork 和其它分支都不会触发。版本号不会被改小。
+- antidetect 版本会去掉 `updateJson`，因为公开的 URL 会让改名失去意义。`scripts/verify-antidetect-package.sh` 会检查它已去掉。
+- 自有 antidetect 资产包按仓库内的 `antidetect/hashes.sha256` 校验，见 `antidetect/README.md`。
+- 定时任务：每天检查并发布新的 Frida 版本；每周一在 release 已存在时额外跑一次只构建、不发布的检查。
+
 ## 设备部署
 
 所有 ADB 命令必须带 `-s <serial>`，禁止依赖默认设备。

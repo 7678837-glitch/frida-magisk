@@ -9,7 +9,11 @@ on:
       - v*
   pull_request:
   schedule:
+    # Daily: detect a new upstream Frida release and publish it.
     - cron: "0 0 * * *"
+    # Weekly (Monday): if the latest release already exists, still run a build-only
+    # check so toolchain breakage (e.g. Android SDK changes) surfaces within a week.
+    - cron: "30 0 * * 1"
   workflow_dispatch:
     inputs:
       frida_version:
@@ -39,6 +43,7 @@ jobs:
       frida_version: ${{ steps.version.outputs.frida_version }}
       release_tag: ${{ steps.version.outputs.release_tag }}
       publish: ${{ steps.release_state.outputs.publish }}
+      build: ${{ steps.release_state.outputs.build }}
 
     steps:
       - name: Checkout repository
@@ -78,11 +83,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
           INPUT_PUBLISH: ${{ inputs.publish_release }}
+          SCHEDULE: ${{ github.event.schedule }}
+          WEEKLY_CRON: "30 0 * * 1"
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
           set -euo pipefail
           publish=false
+          build=true
           case "$GITHUB_EVENT_NAME" in
             push)
               [[ "$GITHUB_REF_TYPE" == "tag" ]] && publish=true
@@ -90,7 +98,12 @@ jobs:
             schedule)
               # gh exits 1 with "release not found" when absent; any other error must fail the job.
               if out="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName 2>&1)"; then
-                echo "Release $RELEASE_TAG already exists; running a build-only check (no publish)."
+                if [[ "$SCHEDULE" == "$WEEKLY_CRON" ]]; then
+                  echo "Release $RELEASE_TAG already exists; weekly build-only check (no publish)."
+                else
+                  echo "Release $RELEASE_TAG already exists; nothing to do on the daily run."
+                  build=false
+                fi
               elif [[ "$out" == *"release not found"* ]]; then
                 echo "Release $RELEASE_TAG does not exist; will build and publish."
                 publish=true
@@ -109,16 +122,21 @@ jobs:
               fi
               ;;
           esac
-          echo "publish=$publish" >> "$GITHUB_OUTPUT"
-          echo "publish=$publish"
+          {
+            echo "publish=$publish"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+          echo "publish=$publish build=$build"
 
       - name: Install build dependencies
+        if: steps.release_state.outputs.build == 'true'
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build zip unzip xz-utils curl
 
       - name: Set up Android SDK
+        if: steps.release_state.outputs.build == 'true'
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           # The default list includes the legacy `tools` package, which Google removed
@@ -126,6 +144,7 @@ jobs:
           packages: platform-tools
 
       - name: Install Android NDK
+        if: steps.release_state.outputs.build == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -137,12 +156,14 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Build module
+        if: steps.release_state.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: scripts/build-all.sh
 
       - name: Upload workflow artifact
+        if: steps.release_state.outputs.build == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frida-magisk-official-${{ env.FRIDA_VERSION }}
@@ -157,6 +178,7 @@ jobs:
     # Never publish from forks, pull requests or non-default branches.
     if: >-
       needs.build.outputs.publish == 'true' &&
+      needs.build.outputs.build == 'true' &&
       github.repository == 'xjoker/frida-magisk' &&
       github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -195,3 +217,35 @@ jobs:
               --title "$tag" \
               --notes "$notes"
           fi
+
+      - name: Check out default branch for update.json
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: repo
+
+      # Only reachable through the gated publish path above (xjoker/frida-magisk,
+      # non-PR, publish=true). Never moves update.json backwards.
+      - name: Update update/official.json on default branch
+        env:
+          FRIDA_VERSION: ${{ needs.build.outputs.frida_version }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+          fi
+          scripts/update-module-json.sh "$FRIDA_VERSION" "$tag" "$GITHUB_REPOSITORY"
+          if git diff --quiet -- update/; then
+            echo "update.json unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add update/
+          git commit -m "chore(update): official module $FRIDA_VERSION [skip ci]"
+          git push origin "HEAD:refs/heads/$DEFAULT_BRANCH"

@@ -111,6 +111,15 @@ Release rule:
 - Tag build publishes the pushed tag.
 - Manual build publishes only when `publish_release=true`.
 
+
+### Module updates (updateJson)
+
+- The official module's `module.prop` sets `updateJson` to `update/official.json` on `main`, so Magisk / KernelSU can offer in-app updates. The update points at the `universal` ZIP.
+- After a successful release, the publish job (only on `xjoker/frida-magisk`, never on PRs, forks or other branches) updates `update/official.json` and `update/official-changelog.md` and pushes the change to the default branch. It never moves to a lower version.
+- The antidetect flavor removes `updateJson`, because a public URL would undo its renaming. `scripts/verify-antidetect-package.sh` checks that it is gone.
+- Owned antidetect asset archives are verified against `antidetect/hashes.sha256` in this repository. See `antidetect/README.md`.
+- Schedule: the daily run publishes new Frida versions. The Monday run also does a build-only check when the latest release already exists.
+
 ## Device Deployment
 
 All ADB commands must include `-s <serial>`. Do not use implicit default devices.
