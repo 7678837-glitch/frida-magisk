@@ -63,10 +63,10 @@ MODULE_ABIS="arm64-v8a" scripts/build-all.sh
 MODULE_ABIS="universal arm64-v8a" scripts/build-all.sh
 ```
 
-`scripts/fetch-frida-assets.sh` 对已知版本内置 SHA-256 固定校验。构建未固定校验值的 Frida 版本时需要显式允许：
+`scripts/fetch-frida-assets.sh` 始终校验 SHA-256：已知版本使用脚本内固定值，其他版本使用 GitHub releases API 为 `frida/frida` 每个资产提供的 `digest`。不再提供跳过校验的模式。建议设置 `GH_TOKEN` 以避免 API 限流：
 
 ```bash
-FRIDA_VERSION=18.0.0 FRIDA_ALLOW_UNVERIFIED=1 scripts/build-all.sh
+FRIDA_VERSION=17.23.3 scripts/build-all.sh
 ```
 
 产物：
@@ -94,14 +94,15 @@ dist/*.sha256
 
 - 推送到 `main` 或 `master`：构建并上传 workflow artifact。
 - 推送 `v*` tag：从 tag 解析版本，构建后创建或更新对应 GitHub Release。
-- `workflow_dispatch` 手动触发：支持 `frida_version`、`allow_unverified`、`publish_release`。
-- `schedule` 每日触发：每天 `00:00 UTC` 检查 Frida 官方最新 release，仅在本仓库没有 `v<最新版本>` release 时构建并发布。
+- `pull_request`：只构建，不发布。
+- `workflow_dispatch` 手动触发：支持 `frida_version`、`publish_release`（只在默认分支上允许发布）。
+- `schedule` 每日触发：每天 `00:00 UTC` 检查 Frida 官方最新 release，仅在本仓库没有 `v<最新版本>` release 时构建并发布；已存在时仍做一次只构建不发布的检查，以便尽早发现工具链问题。
 
 手动构建示例：
 
 ```bash
-gh workflow run build.yml -f frida_version=17.9.1 -f allow_unverified=false -f publish_release=false
-gh workflow run build.yml -f frida_version=latest -f allow_unverified=true -f publish_release=true
+gh workflow run build.yml -f frida_version=17.9.1 -f publish_release=false
+gh workflow run build.yml -f frida_version=latest -f publish_release=true
 ```
 
 Release 规则：
@@ -126,7 +127,7 @@ adb -s <serial> shell su -c id
 通过 KernelSU / SukiSU 安装：
 
 ```bash
-adb -s <serial> push dist/frida-magisk-17.9.1.zip /data/local/tmp/frida-magisk.zip
+adb -s <serial> push dist/frida-magisk-17.9.1-arm64-v8a.zip /data/local/tmp/frida-magisk.zip
 adb -s <serial> shell su -c '/data/adb/ksud module install /data/local/tmp/frida-magisk.zip'
 adb -s <serial> reboot
 ```
@@ -134,7 +135,7 @@ adb -s <serial> reboot
 通过 Magisk CLI 安装：
 
 ```bash
-adb -s <serial> push dist/frida-magisk-17.9.1.zip /data/local/tmp/frida-magisk.zip
+adb -s <serial> push dist/frida-magisk-17.9.1-arm64-v8a.zip /data/local/tmp/frida-magisk.zip
 adb -s <serial> shell su -c 'magisk --install-module /data/local/tmp/frida-magisk.zip'
 adb -s <serial> reboot
 ```
